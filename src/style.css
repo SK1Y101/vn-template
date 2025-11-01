@@ -1,0 +1,97 @@
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: sans-serif;
+    background: #111;
+    text-align: center;
+}
+
+#story-container {
+    max-width: 700px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 2rem;
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.story-node {
+    margin-bottom: 1.5rem;
+    position: relative;
+    color: inherit;
+}
+.story-part {
+    position: relative;
+    color: inherit;
+}
+.story-line {
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    margin-bottom: 0.3rem;
+    color: inherit;
+}
+
+.story-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.5rem;
+    position: relative;
+    z-index: 1;
+}
+
+.story-choice {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    text-align: center;transition: opacity 0.4s ease;
+}
+
+.story-choice.redo {
+    background: #0a84ff;
+    color: white;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+/* currently selectable events */
+.story-choice.active {
+    opacity: 1;
+}
+/* past events we followed */
+.story-choice.selected {
+    opacity: 0.6;
+}
+
+/* past events we did not */
+.story-choice.unselected {
+    opacity: 0.2;
+}
+
+.story-choice:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* animations */
+@keyframes shake {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+    20%,
+    60% {
+        transform: translateX(-1px);
+    }
+    40%,
+    80% {
+        transform: translateX(1px);
+    }
+}
+
+.shake {
+    display: inline-block;
+    /* must be inline-block or block to transform */
+    animation: shake 0.5s ease infinite;
+}

@@ -1,2 +1,5 @@
 # vn-template
-template for web engine
+a small template for web based choice engine stories
+
+# Using the template
+

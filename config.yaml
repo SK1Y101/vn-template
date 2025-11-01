@@ -1,0 +1,17 @@
+# config.yaml
+textSpeed: 300                     # ms per story line
+choiceSpeed: 300                   # ms per choice fade
+fadeDuration: 400                  # fade-in duration in ms
+backgroundTransitionDuration: 500  # ms when fading in text
+textColour: "#eee"
+backgroundColour: "#111"
+redoButtonColour: "#0a84ff"
+maxTextWidth: 700
+scenePadding: "2rem"
+paceMultipliers:
+  fastest: 0.125
+  faster: 0.25
+  fast: 0.5
+  slow: 2
+  slower: 4
+  slowest: 8
