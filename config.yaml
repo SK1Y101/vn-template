@@ -3,10 +3,13 @@ textSpeed: 300                     # ms per story line
 choiceSpeed: 300                   # ms per choice fade
 fadeDuration: 400                  # fade-in duration in ms
 backgroundTransitionDuration: 500  # ms when fading in text
+maxTextWidth: 700
+
 textColour: "#eee"
+darkTextColour: "#222"
 backgroundColour: "#111"
 redoButtonColour: "#0a84ff"
-maxTextWidth: 700
+
 scenePadding: "2rem"
 paceMultipliers:
   fastest: 0.125
@@ -15,3 +18,7 @@ paceMultipliers:
   slow: 2
   slower: 4
   slowest: 8
+
+povCaseInsensitive: true
+povColours:
+  You: mediumpurple

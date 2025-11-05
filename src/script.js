@@ -1,21 +1,34 @@
 const storyContainer = document.getElementById("story-container");
 
 let config;
+let colours;
 let storyData;
+let povColours = {};
 let lastNode = -1;
 
 // Regexes
-// fetch the colours from file to match the validator
-let COLOUR_PATTERN;
-let META_COLOUR_PATTERN;
-fetch("named_colours").then(response => response.text()).then( text => {
-    const colours = text.split(/\r?\n/).filter(Boolean);
-    COLOUR_PATTERN = new RegExp(`\/(${colours.join('|')}|colour #(?:[0-9a-f]{3}){1,2})`, "gi");
-    META_COLOUR_PATTERN = new RegExp(`(${colours.join('|')}|#(?:[0-9a-f]{3}){1,2})`, "gi");
-});
 
 const PACE_PATTERN = /\/(slowest|slower|slow|fastest|faster|fast|pace (\d+)\s?ms)/ig;
 const META_PACE_PATTERN = /(slowest|slower|slow|fastest|faster|fast|(\d+)s?ms)/ig;
+
+const EFFECT_PATTERN = /\/(shake|nudge|bounce|slide-left|slide-right|pulse|blink|grow|pop|glow|tilt|wobble|wave)/ig;
+const META_EFFECT_PATTERN = /(shake|nudge|bounce|slide-left|slide-right|pulse|blink|grow|pop|glow|tilt|wobble|wave)/ig;
+
+const POV_PATTERN = /\/pov (\w+)/ig;
+
+let COLOUR_PATTERN;
+let META_COLOUR_PATTERN;
+
+const MESSAGE_UNSENT_PATTERN = /\/message\-unsent (\w+)/ig;
+const MESSAGE_PATTERN = /\/message (\w+)/ig;
+const MESSAGE_TITLE_PATTERN = /^\/message\-title ([^/]+)$/ig;
+
+function keepView() {
+    window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: 'smooth' // optional, makes it animate nicely
+    });
+}
 
 async function loadConfig() {
     const res = await fetch("../config.yaml");
@@ -23,20 +36,27 @@ async function loadConfig() {
     config = jsyaml.load(text);
 }
 
+async function loadColours() {
+    const text = await fetch("named_colours").then(r => r.text());
+    colours = text.toLowerCase().split(/\r?\n/).filter(Boolean);
+    COLOUR_PATTERN = new RegExp(`\/(${colours.join('|')}|colour #(?:[0-9a-f]{3}){1,2})`, "gi");
+    META_COLOUR_PATTERN = new RegExp(`(${colours.join('|')}|#(?:[0-9a-f]{3}){1,2})`, "gi");
+}
+
 // URL to state and back
 function loadStateFromURL() {
     const params = new URLSearchParams(window.location.search);
     const encodedState = params.get("state");
-    if (!encodedState) return { path: [], variants: [] };
+    if (!encodedState) return { path: [], variants: [], povColours: {}};
     try {
         return JSON.parse(atob(encodedState));
     } catch {
-        return { path: [], variants: [] };
+        return { path: [], variants: [], povColours: []};
     }
 }
 
 function saveStateToURL(path, variants) {
-    const encodedState = btoa(JSON.stringify({path, variants}));
+    const encodedState = btoa(JSON.stringify({path, variants, povColours}));
     const url = new URL(window.location);
     url.searchParams.set("state", encodedState);
     window.history.replaceState(null, "", url);
@@ -62,7 +82,8 @@ async function fadeText(element) {
     element.getBoundingClientRect();
 
     requestAnimationFrame(() => element.style.opacity = computedOpacity);
-    await new Promise(r => setTimeout(r, fadeDuration - speed/2));
+    keepView();
+    await new Promise(r => setTimeout(r, Math.max(speed, fadeDuration)));
 }
 
 function extractRegex(line, regex = COLOUR_PATTERN) {
@@ -70,6 +91,25 @@ function extractRegex(line, regex = COLOUR_PATTERN) {
     if (match) {
         const found = match[0].startsWith("/") ? match[0].slice(1) : match[0];
         return [found, line.replace(regex, "")];
+    }
+    return [null, line];
+}
+
+function extractRegexArg(line, regex = COLOUR_PATTERN) {
+    const match = line.match(regex);
+    if (match) {
+        const found = match[0].split(" ")[1];
+        return [found, line.replace(regex, "")];
+    }
+    return [null, line];
+}
+
+function extractMultipleRegex(line, regex = EFFECT_PATTERN) {
+    const match = line.match(regex);
+    if (match) {
+        let matches = [];
+        for (const m of match) { matches.push(m.replace("\/", "")); }
+        return [matches, line.replace(regex, "")];
     }
     return [null, line];
 }
@@ -89,6 +129,170 @@ function parsePaceMultiplier(pace) {
     return config.paceMultipliers[pace] || 1
 }
 
+function parsePOVColour(pov, partpov = null) {
+    if (!pov) { return null; }
+    if (povColours[pov]) { return povColours[pov]; }
+    allowedColours = colours.filter(col => !Object.values(povColours).includes(col)) || colours;
+    if (partpov) {
+        contrastingColours = allowedColours.filter(col => contrast(col, povColours[partpov]) >= 10) || allowedColours;
+    } else {
+        contrastingColours = allowedColours;
+    }
+    selected = contrastingColours[Math.floor(Math.random() * contrastingColours.length)];
+    povColours[pov] = selected;
+    return selected;
+}
+
+function parseColor(color) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.fillStyle = color;
+    let c = ctx.fillStyle;
+
+    // if hex, convert to r,g,b
+    if (c[0] === "#") {
+        if (c.length === 4) { // #rgb
+            return [
+                parseInt(c[1] + c[1], 16),
+                parseInt(c[2] + c[2], 16),
+                parseInt(c[3] + c[3], 16)
+            ];
+        }
+        return [
+            parseInt(c[1] + c[2], 16),
+            parseInt(c[3] + c[4], 16),
+            parseInt(c[5] + c[6], 16)
+        ];
+    }
+
+    // if rgb(a)
+    const m = c.match(/\d+/g);
+    if (m) return m.slice(0, 3).map(Number);
+
+    // fallback to white
+    return [255, 255, 255];
+}
+
+function contrast(fg, bg) {
+    const [r1, g1, b1] = parseColor(fg);
+    const [r2, g2, b2] = parseColor(bg);
+
+    const b1v = (r1 * 299 + g1 * 587 + b1 * 114) / 1000;
+    const b2v = (r2 * 299 + g2 * 587 + b2 * 114) / 1000;
+
+    return Math.abs(b1v - b2v);
+}
+
+
+function createPOVContainer(pov, partpov = null) {
+    const povContainer = document.createElement("div");
+    const povName = document.createElement("div");
+    const colour = parsePOVColour(pov, partpov);
+
+    povContainer.style.borderColor = colour;
+    povContainer.style.background = `
+        linear-gradient(
+            180deg,
+            color-mix(in srgb, ${colour} 30%, transparent) 0%,
+            color-mix(in srgb, ${colour} 10%, transparent) 100%
+        )
+    `;
+    povContainer.classList.add("story-pov");
+
+    povName.style.color = colour;
+    povName.textContent = pov;
+    povName.classList.add("pov-name");
+    //  we might need to adjust the contrast
+    const bgContrast = contrast(colour, getComputedStyle(document.body).backgroundColor);
+    if (bgContrast < 60) {
+        povName.style.background = `color-mix(in srgb, ${colour} 50%, white)`;
+    }
+
+    povContainer.appendChild(povName);
+    return povContainer;
+}
+
+function caseCheck(pov) {
+    return config.povCaseInsensitive ? pov.toLowerCase() : pov;
+}
+
+function adjustTextColour(obj, bgColour) {
+    if (!obj.style.color) {
+        if (contrast(bgColour, config.textColour) < 60) {
+            obj.style.color = config.darkTextColour;
+        }
+    }
+}
+
+function addNewLine(part, line, pov, lastpov, lastpovcontainer, partpov) {
+    if (pov) {
+        const isPart = caseCheck(pov) === caseCheck(partpov);
+        if (isPart) {
+            // use the default container
+            part.appendChild(line);
+            return null;
+        } else if (caseCheck(pov) === caseCheck(lastpov)) {
+            // out pov hasn't changed
+            lastpovcontainer.appendChild(line);
+            return lastpovcontainer
+        } else {
+            // change to a new pov container
+            const newpovcontainer =createPOVContainer(pov, !isPart ? partpov : null);
+            adjustTextColour(line, newpovcontainer.style.background);
+            newpovcontainer.appendChild(line);
+            part.appendChild(newpovcontainer);
+            return newpovcontainer
+        }
+    } else {
+        part.appendChild(line);
+        return null;
+    }
+}
+
+function formatMessage(storypart, messagecontainer, messageObj, lastmsgObj, pov, lastpov, partpov, unsent, messagetitle) {
+    const povcolour = parsePOVColour(pov, partpov);
+    const mainPov = pov === partpov;
+
+    if (!messagecontainer) {
+        messagecontainer = document.createElement("div");
+        messagecontainer.classList.add("messages");
+        storypart.appendChild(messagecontainer);
+
+        if (messagetitle) {
+            titlename = document.createElement("div");
+            titlename.textContent = messagetitle;
+            titlename.classList.add("message-title")
+            messagecontainer.appendChild(titlename)
+        }
+    }
+
+    if (lastpov === pov) {
+        lastmsgObj.classList.add("merge-bottom");
+        messageObj.classList.add("merge-top");
+    } else {
+        // add a name marker!
+        messageAuthor = document.createElement("div");
+        messageAuthor.style.color = povcolour;
+        messageAuthor.textContent = pov;
+        messageAuthor.classList.add("message-author", mainPov ? "left" : "right");
+        messagecontainer.appendChild(messageAuthor);
+    }
+    messageObj.classList.add("message", mainPov ? "left" : "right");
+
+    if (unsent) {
+        messageObj.classList.add("unsent", "pulse");
+        messageObj.style.background = `color-mix(in srgb, ${povcolour} 30%, transparent)`;
+    } else {
+        messageObj.style.background = povcolour
+    }
+
+    // update the text colour if it won't be readable
+    adjustTextColour(messageObj, povcolour);
+
+    messagecontainer.appendChild(messageObj);
+
+    return [messagecontainer, messageObj, pov];
+}
+
 async function renderText(nodeContainer, node, variantIdx) {
     const storyPart = document.createElement("div");
     storyPart.className = "story-part";
@@ -106,20 +310,77 @@ async function renderText(nodeContainer, node, variantIdx) {
         extractRegex(variant.pace || "", META_PACE_PATTERN)[0]
     );
 
+    // extract any effect classes
+    const effectPart = extractMultipleRegex(variant.effect || "", META_EFFECT_PATTERN)[0];
+
+    const partpov = variant.pov;
+    let partpovcontainer;
+    if (partpov) {
+        partpovcontainer = createPOVContainer(partpov);
+        storyPart.appendChild(partpovcontainer)
+    }
+    let lastpov;
+    let lastpovcontainer;
+
+    // messaging pov
+    const partmessagepov = variant.messagepov || partpov;
+    let lastmessageobj;
+    let lastmessagepov;
+    let messagescontainer;
+
+    // messaging title
+    const messageparttitle = variant.messagetitlt;
+    let messagetitle;
+
     // print the lines
-    const lines = variant.text.split("\n").filter(elem => elem.trim !== "");
+    const lines = variant.text.split("\n").filter(elem => elem.trim());
     for (const line of lines) {
+        // single line commands that should exit early
+        const foundtitle = extractRegex(line, MESSAGE_TITLE_PATTERN)[0];
+        console.log(foundtitle);
+        if (foundtitle) {
+            messagetitle = foundtitle.replace("message-title", "").trim();
+            continue;
+        }
+
+        // commands that still output text
         const storyLine = document.createElement("div");
         storyLine.className = "story-line";
 
         const [col, colourless_line] = extractRegex(line, COLOUR_PATTERN);
-        storyLine.style.color = col;
+        if (col) { storyLine.style.color = col.replace("colour", "").trim(); }
 
         const [pace, paceless_line] = extractRegex(colourless_line, PACE_PATTERN);
 
+        const [effects, effectless_text] = extractMultipleRegex(paceless_line, EFFECT_PATTERN);
+        if (effects) { storyLine.classList.add(...effects); };
+        if (effectPart) { storyLine.classList.add(...effectPart); };
+
+        // register povs if needed
+        const [pov, povlesstext] = extractRegexArg(effectless_text, POV_PATTERN);
+
+        // determine any messages
+        const [unsentmessagepov, unsentlesstext] = extractRegexArg(povlesstext, MESSAGE_UNSENT_PATTERN);
+        const [messagepov, messagelesstext] = extractRegexArg(unsentlesstext, MESSAGE_PATTERN);
+
         // parse markdown to html
-        storyLine.innerHTML = marked.parse(paceless_line);
-        storyPart.append(storyLine);
+        storyLine.innerHTML = marked.parse(messagelesstext);
+
+        // render as a message or not
+        const foundmessagepov = unsentmessagepov || messagepov;
+        if (foundmessagepov) {
+            if (!partmessagepov) { partmessagepov = foundmessagepov; }
+            [messagescontainer, lastmessageobj, lastmessagepov] = formatMessage(storyPart, messagescontainer, storyLine, lastmessageobj, foundmessagepov, lastmessagepov, partmessagepov, unsentmessagepov, messagetitle || messageparttitle);
+            lastpovcontainer = null;
+            lastpov = null;
+        } else {
+            messagescontainer = null;
+            lastmessageobj = null;
+            lastmessagepov = null;
+            messagetitle = null;
+            lastpovcontainer = addNewLine(partpovcontainer || storyPart, storyLine, pov || partpov, lastpov, lastpovcontainer, partpov);
+            lastpov = pov || variant.pov;
+        }
 
         // ensure we wait the right amount of time between lines of text
         const speed = parsePaceMultiplier(pace) * partPace * config.textSpeed;
@@ -155,6 +416,16 @@ function redoButton() {
     return button;
 }
 
+function visitable(path, choices) {
+    return Object.entries(choices).filter(([_, target]) => {
+        const node = storyData[target];
+        if (!node) return true; // unimplemented, sure, let it show
+        const alreadyVisited = path.slice(0, lastNode+2).includes(target);
+        return !alreadyVisited || node.revisit;
+    });
+}
+
+
 async function renderChoices(nodeContainer, path, variants, storyIndex, node, variantIdx) {
     const choicesContainer = document.createElement("div");
     choicesContainer.className = "story-choices";
@@ -164,7 +435,7 @@ async function renderChoices(nodeContainer, path, variants, storyIndex, node, va
     const variant = node.variants[variantIdx];
 
     // fetch the choices for this node
-    const choices = variant.choices ? Object.entries(variant.choices) : [];
+    const choices = variant.choices ? visitable(path, variant.choices) : [];
 
     // determine if these choices have already been made
     const isCurrent = storyIndex >= path.length - 1;
@@ -204,7 +475,7 @@ async function renderChoices(nodeContainer, path, variants, storyIndex, node, va
                     path.push(target);
                     variants.push(variantIdx);
                     choiceButton.classList.add("selected");
-                    saveStateToURL(path, variants);
+                    saveStateToURL(path, variants, povColours);
                     unselectChoices();
                     renderPath(path, variants, storyIndex + 1);
                 }
@@ -218,6 +489,7 @@ async function renderChoices(nodeContainer, path, variants, storyIndex, node, va
     const speed = parseFloat(config.choiceSpeed);
     for (const button of buttons) {
         choicesContainer.appendChild(button);
+        keepView();
         await new Promise(r => setTimeout(r, speed));
     }
 
@@ -242,6 +514,9 @@ async function renderNode(path, variants, storyIndex, node, variantIdx) {
     // create the choices, if they exist
     // because choices will progress the story, we need to pass the path and variants trackers
     await renderChoices(nodeContainer, path, variants, storyIndex, node, variantIdx);
+
+    // ensure we have scrolled enough
+    keepView();
 }
 
 function chooseVariant(node, index = null) {
@@ -267,6 +542,7 @@ async function renderPath(path, variants, startIndex = null) {
             await fadeText(emptyNode);
 
             storyContainer.appendChild(redoButton());
+            keepView();
             continue;
         }
 
@@ -274,6 +550,16 @@ async function renderPath(path, variants, startIndex = null) {
         const variantIdx = chooseVariant(node, variants[i]);
         await renderNode(path, variants, i, node, variantIdx);
         lastNode = i;
+    }
+}
+
+function updatePOVColours(povState) {
+    if (!povState) { return }
+    for (const [key, value] of Object.entries(povState)) {
+        if (!povColours[key]) {
+            const match = value.match(META_COLOUR_PATTERN);
+            if (match) { povColours[key] = match[0]; };
+        }
     }
 }
 
@@ -306,17 +592,22 @@ function resetStory() {
 // Start the rendering of the story plz
 async function initStory() {
     await loadConfig();
+    await loadColours();
+    updatePOVColours(config.povColours);
 
     document.body.style.background = config.backgroundColour || "#111";
     storyContainer.style.color = config.textColour || "#eee";
 
     storyData = await fetch("story.json").then(r => r.json());
-    const { path, variants } = loadStateFromURL();
+    const state = loadStateFromURL();
+    const path = state["path"];
+
+    updatePOVColours(state["povColours"]);
 
     if (!path.length) {
         resetStory();
     } else {
-        renderPath(path, variants);
+        renderPath(path, state["variants"]);
     }
 }
 
