@@ -5,6 +5,7 @@ from typing import Any, Callable
 from yaml import safe_load
 import sys
 from json import dumps
+from collections import Counter
 import re
 
 SPEEDS = "fastest|faster|fast|slowest|slower|slow"
@@ -18,6 +19,18 @@ HEX_COLOURS = r"#(?:[0-9a-f]{3}){1,2}"
 COLOUR_PATTERN = re.compile(rf"/({'|'.join(NAMED_COLOURS)}|colour {HEX_COLOURS})")
 META_COLOUR_PATTERN = re.compile(rf"^({'|'.join(NAMED_COLOURS)}|{HEX_COLOURS})$")
 
+EFFECT_PATTERN = re.compile(r"/(shake|nudge|bounce|slide-left|slide-right|pulse|blink|grow|pop|glow|tilt|wobble|wave)")
+META_EFFECT_PATTERN = re.compile(EFFECT_PATTERN.pattern[1:])
+
+POV_PATTERN = re.compile(r"/pov \w+")
+META_POV_PATTERN = re.compile(r"^\w+$")
+
+MESSAGE_PATTERN = re.compile(r"/message(-unsent)? \w+")
+META_MESSAGE_PATTERN = re.compile(r"message-pov \w+")
+
+MESSAGE_TITLE_PATTERN = re.compile(r"^/message-title ([^/]+)$")
+META_MESSAGE_TITLE_PATTERN = re.compile(r"message-title .+")
+
 def debug(msg: str):
     if DEBUG:
         print(f" - {msg}")
@@ -28,6 +41,10 @@ class StoryParts:
     is_start: bool = False
     is_end: bool = False
 
+    @property
+    def revisit(self) -> bool:
+        return all(variant.revisit for variant in self.variants)
+
 @dataclass
 class StoryPart:
     text: str
@@ -35,6 +52,11 @@ class StoryPart:
     pathname: str
     pace: str | None
     colour: str | None
+    effect: str | None
+    pov: str | None
+    messagepov: str | None
+    messagetitle: str | None
+    revisit: bool = True
     choices: dict[str, str] = field(default_factory=dict)
 
 def parse_markdown(content: str) -> tuple[dict[str, Any], str]:
@@ -47,8 +69,11 @@ def parse_markdown(content: str) -> tuple[dict[str, Any], str]:
 
 def find_parts() ->  dict[str, StoryParts]:
     parts: dict[str, StoryParts] = {}
-    for f in Path("story").glob("**/*.md"):
-        pathname = f.parts[-2]
+    base = Path("story")
+    for f in base.glob("**/*.md"):
+        has_variants = len(f.parts) > 2
+
+        pathname = f.parts[-2] if has_variants else f.stem
 
         metadata, body = parse_markdown(f.read_text("utf-8"))
         this_part = StoryPart(
@@ -58,6 +83,11 @@ def find_parts() ->  dict[str, StoryParts]:
             pathname=pathname,
             pace=metadata.get("pace"),
             colour=metadata.get("colour"),
+            effect=metadata.get("effect"),
+            pov=metadata.get("pov"),
+            revisit=metadata.get("revisit", True),
+            messagepov=metadata.get("message-pov"),
+            messagetitle=metadata.get("message-title"),
         )
 
         if pathname not in parts:
@@ -154,6 +184,14 @@ def continuing_ends(parts: dict[str, StoryParts]) -> list[StoryPart]:
                     nodes.append(part)
     return nodes
 
+def revist_variants(parts: dict[str, StoryParts]) -> list[StoryPart]:
+    nodes = []
+    for _, path in parts.items():
+        for part in path.variants:
+            if path.revisit and not part.revisit:
+                nodes.append(part)
+    return nodes
+
 def noncontinuing_variants(parts: dict[str, StoryParts]) -> list[StoryPart]:
     nodes = []
     for _, path in parts.items():
@@ -207,7 +245,8 @@ def unreachable_nodes(parts: dict[str, StoryParts]) -> list[StoryPart]:
 def looping_nodes(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
     loops: list[list[StoryPart]] = []
     def depth_search(node: StoryPart, ancestors: list[StoryPart] = []) -> None:
-        if node.pathname in [ancestor.pathname for ancestor in ancestors]:
+        ancestor_names = [ancestor.pathname for ancestor in ancestors]
+        if node.pathname in ancestor_names:
             loops.append(ancestors+[node])
             return
 
@@ -220,6 +259,10 @@ def looping_nodes(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
 
         for choice in node.choices.values():
             if choice in parts:
+                # skip if we're not revisitin
+                if not parts[choice].revisit and choice in ancestor_names:
+                    continue
+
                 for variant in parts[choice].variants:
                     depth_search(variant, ancestors + [node])
 
@@ -350,7 +393,10 @@ def abnormal_paths(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
         this_part = parts[node.pathname]
 
         has_valid_choices = any(
-            any(choice in parts for choice in variant.choices.values())
+            any(
+                choice in parts
+                for choice in variant.choices.values()
+            )
             for variant in this_part.variants
         )
 
@@ -362,6 +408,11 @@ def abnormal_paths(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
             for choice in variant.choices.values():
                 if choice not in parts:
                     continue
+
+                # skip if we're not revisitin
+                if choice in pathnames and not parts[choice].revisit:
+                    continue
+
                 for next_variant in parts[choice].variants:
                     traverse(next_variant, new_path)
 
@@ -374,50 +425,18 @@ def abnormal_paths(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
     average_path = sum(len(path) for path in all_paths) / len(all_paths)
     return [path for path in all_paths if abs(len(path) - average_path) > 1]
 
-def colour_metadata(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
+def command_metadata(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, property: str = "colour") -> list[StoryPart]:
     nodes = []
 
     for path in parts.values():
         for part in path.variants:
-            if colour:=part.colour:
-                if not META_COLOUR_PATTERN.match(colour):
+            if match:=getattr(part, property, None):
+                if not regex.match(match):
                     nodes.append(part)
 
     return nodes
 
-def colour_markers(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
-    nodes = []
-
-    for path in parts.values():
-        for part in path.variants:
-            for line in part.text.splitlines():
-                stripped = line.strip()
-                if not stripped:
-                    continue
-
-                markers = COLOUR_PATTERN.findall(stripped)
-                if len(markers) > 1:
-                    nodes.append(part)
-                    break
-
-                if markers and not stripped.startswith("/"):
-                    nodes.append(part)
-                    break
-
-    return nodes
-
-def speed_metadata(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
-    nodes = []
-
-    for path in parts.values():
-        for part in path.variants:
-            if pace:=part.pace:
-                if not META_PACE_PATTERN.match(pace):
-                    nodes.append(part)
-
-    return nodes
-
-def speed_markers(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
+def commands_in_text(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, allow_multiple: bool = False) -> list[StoryPart]:
     nodes = []
 
     for path in parts.values():
@@ -427,8 +446,8 @@ def speed_markers(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
                 if not stripped:
                     continue
 
-                markers = PACE_PATTERN.findall(stripped)
-                if len(markers) > 1:
+                markers = regex.findall(stripped)
+                if not allow_multiple and len(markers) > 1:
                     nodes.append(part)
                     break
 
@@ -438,7 +457,7 @@ def speed_markers(parts: dict[str, "StoryParts"]) -> list["StoryPart"]:
 
     return nodes
 
-def excessive_speed_markers(parts: dict[str, "StoryParts"], threshold: float = 0.25) -> list["StoryPart"]:
+def excessive_commands(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, threshold: float = 0.5) -> list[StoryPart]:
     nodes = []
 
     for path in parts.values():
@@ -447,13 +466,54 @@ def excessive_speed_markers(parts: dict[str, "StoryParts"], threshold: float = 0
             if not lines:
                 continue
 
-            marker_lines = sum(1 for line in lines if PACE_PATTERN.search(line.strip()))
-            fraction = marker_lines / len(lines)
+            if match := regex.findall(part.text):
+                frequency = Counter(match)
 
-            if fraction > threshold and len(lines) > 4:
-                nodes.append(part)
+                # we're using a certain effect marker a lot, consider applying it to the node itself
+                most_used = frequency.most_common(1)[0][1]
+                fraction = most_used / len(lines)
+                if fraction > threshold and len(lines) > 4:
+                    nodes.append(part)
 
     return nodes
+
+def colour_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_COLOUR_PATTERN, "colour")
+def colour_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, COLOUR_PATTERN)
+def excessive_colours(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, COLOUR_PATTERN)
+
+def pace_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_PACE_PATTERN, "pace")
+def pace_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, PACE_PATTERN)
+def excessive_pacing(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, PACE_PATTERN)
+
+def effect_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_EFFECT_PATTERN, "effect")
+def effect_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, EFFECT_PATTERN, allow_multiple=True)
+def excessive_effects(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, EFFECT_PATTERN)
+
+def pov_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_POV_PATTERN, "pov")
+def pov_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, POV_PATTERN)
+def excessive_povs(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, POV_PATTERN)
+
+def message_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_MESSAGE_PATTERN, "message-pov")
+def message_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, MESSAGE_PATTERN)
+
+def message_title_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_MESSAGE_TITLE_PATTERN, "message-title")
+def message_title_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, MESSAGE_TITLE_PATTERN)
 
 
 def generate_json(parts: dict[str, StoryParts]) -> dict[str, Any]:
@@ -462,8 +522,19 @@ def generate_json(parts: dict[str, StoryParts]) -> dict[str, Any]:
         output[pathname] = {
             "start": part.is_start,
             "end": part.is_end,
+            "revisit": part.revisit,
             "variants": [
-                {"choices": v.choices, "text": v.text} | ({"pace": v.pace} if v.pace else {})| ({"colour": v.colour} if v.colour else {}) for v in part.variants
+                {
+                    "choices": v.choices,
+                    "text": v.text
+                } | ( {"pace": v.pace} if v.pace else {}
+                ) | ( {"colour": v.colour} if v.colour else {}
+                ) | ( {"effect": v.effect} if v.effect else {}
+                ) | ( {"pov": v.pov} if v.pov else {}
+                ) | ( {"messagepov": v.messagepov} if v.messagepov else {}
+                ) | ( {"messagetitle": v.messagetitle} if v.messagetitle else {}
+                )
+                for v in part.variants
             ],
         }
     return output
@@ -481,7 +552,7 @@ def pretty_print_paths(value: Any, indent: int = 0, separators: list[str] | None
         if isinstance(val, StoryPart):
             return val.filepath.name
         elif isinstance(val, list):
-            return sep.join(sorted(format_paths(v, depth + 1) for v in val))
+            return sep.join(sorted(set(format_paths(v, depth + 1) for v in val)))
         else:
             return str(val)
 
@@ -523,20 +594,40 @@ def main() -> int:
         StoryCheck(empty_nodes, "parts without text"),
         StoryCheck(duplicate_nodes, "parts with duplicate text"),
         StoryCheck(invalid_links, "parts with missing or invalid links", False),
+
         StoryCheck(dead_ends, "parts with no choices"),
         StoryCheck(continuing_ends, "ending parts contain choices"),
         StoryCheck(noncontinuing_variants, "parts with choices on only some variants"),
+        StoryCheck(revist_variants, "parts are revisitable while others aren't"),
         StoryCheck(single_choice, "parts with a single choice", False),
-        StoryCheck(duplicate_choices, "parts with duplicate choice paths", False,),
+        StoryCheck(duplicate_choices, "parts with duplicate choice paths", False),
+
         StoryCheck(unreachable_nodes, "parts that cannot be reached"),
         StoryCheck(escapable_looping_nodes, "parts with looping choices", False),
         StoryCheck(innescapable_looping_nodes, "parts with innescapable looping choices", True),
         StoryCheck(abnormal_paths, "parts with very short comparable paths", False),
+
         StoryCheck(colour_metadata, "parts with valid colour options", True),
         StoryCheck(colour_markers, "parts with valid colour markers", True),
-        StoryCheck(speed_metadata, "parts with valid speed options", True),
-        StoryCheck(speed_markers, "parts with valid speed markers", True),
-        StoryCheck(excessive_speed_markers, "to many parts with speed markers", True),
+        StoryCheck(excessive_colours, "to many parts with non-unique colour markers", True),
+
+        StoryCheck(pace_metadata, "parts with valid pace options", True),
+        StoryCheck(pace_markers, "parts with valid pace markers", True),
+        StoryCheck(excessive_pacing, "to many parts with non-unique pace markers", True),
+
+        StoryCheck(effect_metadata, "parts with valid effect options", True),
+        StoryCheck(effect_markers, "parts with valid effect markers", True),
+        StoryCheck(excessive_effects, "to many parts with non-unique effect markers", True),
+
+        StoryCheck(pov_metadata, "parts with valid pov options", True),
+        StoryCheck(pov_markers, "parts with valid pov markers", True),
+        StoryCheck(excessive_povs, "to many parts with non-unique pov markers", True),
+
+        StoryCheck(message_metadata, "parts with valid message-pov options", True),
+        StoryCheck(message_markers, "parts with valid message markers", True),
+
+        StoryCheck(message_title_metadata, "parts with valid message-title options", True),
+        StoryCheck(message_title_markers, "parts with valid message title markers", True),
     ]
 
     func_pad = 0

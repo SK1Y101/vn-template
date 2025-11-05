@@ -7,6 +7,10 @@ body {
     background: #111;
     text-align: center;
 }
+p {
+    padding: 0%;
+    margin: 0.2em;
+}
 
 #story-container {
     max-width: 700px;
@@ -15,6 +19,8 @@ body {
     padding: 2rem;
     box-sizing: border-box;
     pointer-events: none;
+    height:auto;
+    padding-bottom: 7.5%;
 }
 
 .story-node {
@@ -74,24 +80,119 @@ body {
     background: rgba(255, 255, 255, 0.15);
 }
 
-/* animations */
-@keyframes shake {
-    0%,
-    100% {
-        transform: translateX(0);
-    }
-    20%,
-    60% {
-        transform: translateX(-1px);
-    }
-    40%,
-    80% {
-        transform: translateX(1px);
-    }
+.part {
+    /* --pov-color: lightcoral; */
+    border-radius: 1em;
+    padding: 1em;
 }
 
-.shake {
+.story-pov {
+    border-radius: 1em;
+    border-width: 2px;
+    border-style: solid;
+    border-color: #111;
+    padding: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.pov-name {
+    /* background-color: rgba(255, 255, 255, 0.25); */
+    width: fit-content;
+    border-radius: 0.25em;
+    padding: 0 0.25em 0 0.25em;
+    margin: auto;
+}
+
+/* message bubbles */
+
+.messages {
+    display: flex;
+    flex-direction: column;
+    color: inherit;
+}
+.message {
+    padding: 0.5em 0.75em;
+    margin-left: 2em;
+    margin-right: 2em;
+    border-radius: 1.5em;
+    max-width: 70%;
     display: inline-block;
-    /* must be inline-block or block to transform */
-    animation: shake 0.5s ease infinite;
+    position: relative;
+    margin-bottom: 1em;
+    color: inherit;
+}
+.message.left {
+    align-self: flex-end;
+    text-align: right;
+}
+.message.right {
+    align-self: flex-start;
+    text-align: left;
+}
+.message.merge-top {
+    border-top-left-radius: 0.5em;
+    border-top-right-radius: 0.5em;
+    margin-top: 0em;
+}
+.message.merge-bottom {
+    border-bottom-left-radius: 0.5em;
+    border-bottom-right-radius: 0.5em;
+    margin-bottom: 0.15em;
+}
+.message-author {
+    margin: 0em 3em 0.15em 3em;
+}
+.message-author.left {
+    align-self: flex-end;
+    text-align: right;
+}
+.message-author.right {
+    align-self: flex-start;
+    text-align: left;
+}
+.message-title {
+    margin-top: 1em;
+    color: #111;
+    font-weight: bold;
+    border-top-left-radius: 1em;
+    border-top-right-radius: 1em;
+    background-color: #eee;
+}
+
+
+.message.unsent {
+    padding-bottom: 1.5em;
+}
+.message.unsent::after {
+    content: ". . .";
+    position: absolute;
+    bottom: 0.3em;
+    right: 1%;
+    transform: translateX(-50%);
+    font-size: 1.2em;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: bold;
+    animation: typingWave 1s infinite linear;
+}
+@keyframes typingWave {
+    0%,
+    20%,
+    100% {
+        transform: translateX(-50%) translateY(0);
+    }
+    10% {
+        transform: translateX(-50%) translateY(-0.2em);
+    }
+    30% {
+        transform: translateX(-50%) translateY(-0.1em);
+    }
+    50% {
+        transform: translateX(-50%) translateY(-0.15em);
+    }
+    70% {
+        transform: translateX(-50%) translateY(-0.1em);
+    }
+    90% {
+        transform: translateX(-50%) translateY(-0.2em);
+    }
 }
