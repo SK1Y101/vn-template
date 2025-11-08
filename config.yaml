@@ -3,6 +3,9 @@ textSpeed: 300                     # ms per story line
 choiceSpeed: 300                   # ms per choice fade
 fadeDuration: 400                  # fade-in duration in ms
 backgroundTransitionDuration: 500  # ms when fading in text
+effectTransitionTime: 2000         # ms when fading in and out weather and back/foreground effects
+backgroundTransitionTime: 2000     # ms when fading between background colour states
+
 maxTextWidth: 700
 
 textColour: "#eee"
