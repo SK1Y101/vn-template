@@ -2,7 +2,8 @@ html,
 body {
     margin: 0;
     padding: 0;
-    height: 100%;
+    height: auto;
+    min-height: 100vh;
     font-family: sans-serif;
     background: #111;
     text-align: center;

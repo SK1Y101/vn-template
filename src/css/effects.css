@@ -1,0 +1,66 @@
+/* Register focus-size as animatable */
+@property --focus-size {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: 100%;
+}
+@property --bloom-intensity {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+@property --noise-opacity {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+@property --chromatic-offset {
+    syntax: '<length>';
+    inherits: false;
+    initial-value: 0px;
+}
+@property --tint-r {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+@property --tint-g {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+@property --tint-b {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+
+#effect-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+    transition: --focus-size 2000ms, --chromatic 2000ms, --bloom 2000ms, --noise 2000ms, --tint-r 2000ms, --tint-g 2000ms, --tint-b 2000ms;
+
+    --focus-size: 100%;
+    background:
+        radial-gradient(circle, transparent var(--focus-size), #000 100%),
+        rgba();
+
+    --bloom-intensity: 0;
+
+
+    --noise: 0;
+
+
+    --chromatic: 0;
+
+
+    --tint-r: 0;
+    --tint-g: 0;
+    --tint-b: 0;
+}
+
