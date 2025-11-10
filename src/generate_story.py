@@ -9,15 +9,16 @@ from collections import Counter
 import re
 
 SPEEDS = "fastest|faster|fast|slowest|slower|slow"
-PACE_PATTERN = re.compile(rf"/({SPEEDS}|speed \d+\s?ms)")
-META_PACE_PATTERN = re.compile(rf"^({SPEEDS}|\d+\s?ms)$")
+PACE_PATTERN = re.compile(rf"/({SPEEDS}|pace \d+\s?(ms|s))")
+META_PACE_PATTERN = re.compile(rf"^({SPEEDS}|\d+\s?(ms|s))$")
 EXCESSIVE_THRESHOLD = 0.25
-DEBUG = "-debug" in sys.argv
+DEBUG = {"-d", "-debug", "-DEBUG"}.intersection(sys.argv)
 
 NAMED_COLOURS = Path("src/named_colours").read_text().lower().splitlines()
 HEX_COLOURS = r"#(?:[0-9a-f]{3}){1,2}"
-COLOUR_PATTERN = re.compile(rf"/({'|'.join(NAMED_COLOURS)}|colour {HEX_COLOURS})")
-META_COLOUR_PATTERN = re.compile(rf"^({'|'.join(NAMED_COLOURS)}|{HEX_COLOURS})$")
+COLOUR_PATTERN = re.compile(rf"/({'|'.join(NAMED_COLOURS)}|reset|colour {HEX_COLOURS})")
+META_COLOUR_PATTERN = re.compile(rf"^({'|'.join(NAMED_COLOURS)}|reset|{HEX_COLOURS})$")
+BACKGROUND_COLOUR_PATTERN = re.compile(rf"^/background ({'|'.join(NAMED_COLOURS)}|reset|{HEX_COLOURS})$")
 
 EFFECT_PATTERN = re.compile(r"/(shake|nudge|bounce|slide-left|slide-right|pulse|blink|grow|pop|glow|tilt|wobble|wave)")
 META_EFFECT_PATTERN = re.compile(EFFECT_PATTERN.pattern[1:])
@@ -31,9 +32,33 @@ META_MESSAGE_PATTERN = re.compile(r"message-pov \w+")
 MESSAGE_TITLE_PATTERN = re.compile(r"^/message-title ([^/]+)$")
 META_MESSAGE_TITLE_PATTERN = re.compile(r"message-title .+")
 
-def debug(msg: str):
+PAUSE_PATTERN = re.compile(r"^/pause \d+\s?(ms|s)$")
+
+FRACTION = r"(?:0(?:\.\d+)?|1(?:\.0+)?)"
+BYTE = r"(?:25[0-5]|2[0-4]\d|1?\d{1,2})"
+BYTES = rf"{BYTE}\s,?{BYTE}\s,?{BYTE}"
+BACKGROUND_EFFECTS_PATTERN = re.compile(
+    r"^/(" +
+    "|".join((
+        r"focus (?:\d+\%|reset)",
+        rf"bloom (?:{FRACTION}|reset)",
+        rf"noise (?:{FRACTION}|reset)",
+        r"chromatic (?:\d+|reset)",
+        rf"tint (?:reset|{BYTES}|{HEX_COLOURS}|{'|'.join(NAMED_COLOURS)})",
+        r"effect reset"
+        )) +
+    ")"
+)
+
+WEATHER_PATTERN = re.compile(r"^/(rain|snow|fog|dust|fireflies|blizzard|harsh-sun|clear|none)$")
+META_WEATHER_PATTERN = re.compile(rf"^{WEATHER_PATTERN.pattern[1:]}$")
+
+def debug(part: StoryPart | None = None, msg: str = ""):
     if DEBUG:
-        print(f" - {msg}")
+        if part:
+            print(f" - {part.pathname}: {msg}")
+        else:
+            print(f" - {msg}")
 
 @dataclass
 class StoryParts:
@@ -56,6 +81,8 @@ class StoryPart:
     pov: str | None
     messagepov: str | None
     messagetitle: str | None
+    background: str | None
+    weather: str | None
     revisit: bool = True
     choices: dict[str, str] = field(default_factory=dict)
 
@@ -88,6 +115,8 @@ def find_parts() ->  dict[str, StoryParts]:
             revisit=metadata.get("revisit", True),
             messagepov=metadata.get("message-pov"),
             messagetitle=metadata.get("message-title"),
+            background=metadata.get("background"),
+            weather=metadata.get("weather"),
         )
 
         if pathname not in parts:
@@ -98,7 +127,7 @@ def find_parts() ->  dict[str, StoryParts]:
             )
         else:
             parts[pathname].variants.append(this_part)
-        debug(f"added {f.name} to {pathname}")
+        debug(msg=f"added {f.name} to {pathname}")
 
     return parts
 
@@ -159,9 +188,11 @@ def invalid_links(parts: dict[str, StoryParts]) -> list[StoryPart]:
         for part in path.variants:
             for choice in part.choices.values():
                 if choice not in parts.keys():
+                    debug(part, f"{choice} was not in {parts.keys()}")
                     nodes.append(part)
                     break
                 if choice is None:
+                    debug(part, "choice option was empty")
                     nodes.append(part)
                     break
     return nodes
@@ -425,6 +456,37 @@ def abnormal_paths(parts: dict[str, StoryParts]) -> list[list[StoryPart]]:
     average_path = sum(len(path) for path in all_paths) / len(all_paths)
     return [path for path in all_paths if abs(len(path) - average_path) > 1]
 
+def unknwon_markers(parts: dict[str, StoryParts]) -> list[StoryPart]:
+    nodes = []
+
+    for path in parts.values():
+        for part in path.variants:
+            for line in part.text.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                for regex in [
+                    PACE_PATTERN,
+                    COLOUR_PATTERN,
+                    BACKGROUND_COLOUR_PATTERN,
+                    EFFECT_PATTERN,
+                    POV_PATTERN,
+                    MESSAGE_PATTERN,
+                    MESSAGE_TITLE_PATTERN,
+                    PAUSE_PATTERN,
+                    WEATHER_PATTERN,
+                    BACKGROUND_EFFECTS_PATTERN,
+                ]:
+                    stripped = regex.sub("", stripped)
+
+                if markers := re.findall(r"[^`\w]/\w+", stripped):
+                    nodes.append(part)
+                    print(stripped)
+                    debug(part, f"Unknown markers in text: "+', '.join(markers))
+
+    return nodes
+
 def command_metadata(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, property: str = "colour") -> list[StoryPart]:
     nodes = []
 
@@ -432,11 +494,12 @@ def command_metadata(parts: dict[str, StoryParts], regex: re.Pattern[str] = META
         for part in path.variants:
             if match:=getattr(part, property, None):
                 if not regex.match(match):
+                    debug(part, f"has invalid metadata pattern")
                     nodes.append(part)
 
     return nodes
 
-def commands_in_text(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, allow_multiple: bool = False) -> list[StoryPart]:
+def commands_in_text(parts: dict[str, StoryParts], regex: re.Pattern[str] = META_COLOUR_PATTERN, allow_multiple: bool = False, only: bool = False) -> list[StoryPart]:
     nodes = []
 
     for path in parts.values():
@@ -449,10 +512,17 @@ def commands_in_text(parts: dict[str, StoryParts], regex: re.Pattern[str] = META
                 markers = regex.findall(stripped)
                 if not allow_multiple and len(markers) > 1:
                     nodes.append(part)
+                    debug(part, f"has more than one marker")
                     break
 
                 if markers and not stripped.startswith("/"):
                     nodes.append(part)
+                    debug(part, f"has markers not at the start of the text")
+                    break
+
+                if markers and only and regex.sub("", stripped).strip():
+                    nodes.append(part)
+                    debug(part, f"has other markers despite being an exclusive line")
                     break
 
     return nodes
@@ -473,6 +543,7 @@ def excessive_commands(parts: dict[str, StoryParts], regex: re.Pattern[str] = ME
                 most_used = frequency.most_common(1)[0][1]
                 fraction = most_used / len(lines)
                 if fraction > threshold and len(lines) > 4:
+                    debug(part, f"is {fraction*100}% {most_used}")
                     nodes.append(part)
 
     return nodes
@@ -513,7 +584,27 @@ def message_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
 def message_title_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
     return command_metadata(parts, META_MESSAGE_TITLE_PATTERN, "message-title")
 def message_title_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
-    return commands_in_text(parts, MESSAGE_TITLE_PATTERN)
+    return commands_in_text(parts, MESSAGE_TITLE_PATTERN, only=True);
+
+def weather_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_WEATHER_PATTERN, "weather")
+def weather_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, WEATHER_PATTERN, only=True)
+def excessive_weather(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, WEATHER_PATTERN)
+
+def background_metadata(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return command_metadata(parts, META_COLOUR_PATTERN, "background")
+def background_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, BACKGROUND_COLOUR_PATTERN, only=True)
+def excessive_background(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return excessive_commands(parts, BACKGROUND_COLOUR_PATTERN)
+
+def pause_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, PAUSE_PATTERN, only=True)
+
+def background_effect_markers(parts: dict[str, StoryParts])-> list[StoryPart]:
+    return commands_in_text(parts, BACKGROUND_EFFECTS_PATTERN, only=True)
 
 
 def generate_json(parts: dict[str, StoryParts]) -> dict[str, Any]:
@@ -533,6 +624,8 @@ def generate_json(parts: dict[str, StoryParts]) -> dict[str, Any]:
                 ) | ( {"pov": v.pov} if v.pov else {}
                 ) | ( {"messagepov": v.messagepov} if v.messagepov else {}
                 ) | ( {"messagetitle": v.messagetitle} if v.messagetitle else {}
+                ) | ( {"weather": v.weather} if v.weather else {}
+                ) | ( {"background": v.background} if v.background else {}
                 )
                 for v in part.variants
             ],
@@ -607,6 +700,8 @@ def main() -> int:
         StoryCheck(innescapable_looping_nodes, "parts with innescapable looping choices", True),
         StoryCheck(abnormal_paths, "parts with very short comparable paths", False),
 
+        StoryCheck(unknwon_markers, "parts with unknown markers applied", True),
+
         StoryCheck(colour_metadata, "parts with valid colour options", True),
         StoryCheck(colour_markers, "parts with valid colour markers", True),
         StoryCheck(excessive_colours, "to many parts with non-unique colour markers", True),
@@ -628,6 +723,18 @@ def main() -> int:
 
         StoryCheck(message_title_metadata, "parts with valid message-title options", True),
         StoryCheck(message_title_markers, "parts with valid message title markers", True),
+
+        StoryCheck(weather_metadata, "parts with valid weather options", True),
+        StoryCheck(weather_markers, "parts with valid weather markers", True),
+        StoryCheck(excessive_weather, "to many parts with non-unique weather markers", True),
+
+        StoryCheck(background_metadata, "parts with valid background options", True),
+        StoryCheck(background_markers, "parts with valid background markers", True),
+        StoryCheck(excessive_background, "to many parts with non-unique background markers", True),
+
+        StoryCheck(pause_markers, "parts with valid pause markers", True),
+
+        StoryCheck(background_effect_markers, "parts with valid background effect markers", True),
     ]
 
     func_pad = 0
@@ -640,6 +747,8 @@ def main() -> int:
     check_count = len(checks)
     checkpad = len(str(check_count))
     for i, check in enumerate(checks):
+        debug(msg=str(i+1).rjust(checkpad) + f"/{check_count} Testing {check.function.__name__}")
+
         text = str(i+1).rjust(checkpad) + f"/{check_count} " + check.function.__name__.capitalize().ljust(func_pad) + f" - {check.check_type}"
         value = check.function(parts)
         if (not value and check.raise_on_empty) or(value and not check.raise_on_empty):
