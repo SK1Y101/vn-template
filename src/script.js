@@ -1,5 +1,5 @@
 const storyContainer = document.getElementById("story-container");
-const weatherOverlay = document.getElementById("weather-overlay");
+const weatherCanvas = document.getElementById("weather-canvas");
 const effectOverlay = document.getElementById("effect-overlay");
 
 let config;
@@ -24,10 +24,9 @@ const MESSAGE_UNSENT_PATTERN = /\/message\-unsent \w+/ig;
 const MESSAGE_PATTERN = /\/message (\w+)/ig;
 const MESSAGE_TITLE_PATTERN = /^\/message\-title [^/]+$/ig;
 
-const BACKGROUND_EFFECT_PATTERN = /^\/(?:(focus|bloom|noise|chromatic) (\d+(\.\d+)?\%?|reset))|(effect reset)$/ig;
-let BACKGROUND_TINT_PATTERN;
+const BACKGROUND_EFFECT_PATTERN = /^\/(?:(focus) (\d+(\.\d+)?\%?|reset))|(effect reset)$/ig;
 
-const WEATHER_PATTERN = /^\/(rain|snow|fog|dust|fireflies|blizzard|harsh-sun|clear|none)$/ig;
+const WEATHER_PATTERN = /^\/(rain|snow|fog|overcast|dust|fireflies|blizzard|aurora|wind|thunderstorm|sunny|night|clear|none)$/ig;
 
 function keepView() {
     window.scrollTo({
@@ -61,39 +60,22 @@ async function loadColours() {
     colours = text.toLowerCase().split(/\r?\n/).filter(Boolean);
     COLOUR_PATTERN = new RegExp(`\/(${colours.join('|')}|reset|colour #(?:[0-9a-f]{3}){1,2})`, "gi");
     BACKGROUND_PATTERN = new RegExp(`^\/background (${colours.join('|')}|reset|#(?:[0-9a-f]{3}){1,2})`, "gi");
-    BACKGROUND_TINT_PATTERN = new RegExp(
-        `^/tint\\s+(?:` +
-        // three 1-3 digit numbers separated by spaces or commas (allow extra spaces)
-        `\\d{1,3}(?:[ ,]\\s*\\d{1,3}){2}` +
-        `|` +
-        // 3- or 6-digit hex (#fff or #ffaa33)
-        `#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})` +
-        `|` +
-        // reset
-        `reset` +
-        `|` +
-        // color names (escaped)
-        `(?:${colours.join('|') })` +
-        `)\\s*$`,
-        'i' // case-insensitive
-    );
-
 }
 
 // URL to state and back
 function loadStateFromURL() {
     const params = new URLSearchParams(window.location.search);
     const encodedState = params.get("state");
-    if (!encodedState) return { path: [], variants: [], povColours: {}};
+    if (!encodedState) return { path: [], variants: [], povColours: {} };
     try {
         return JSON.parse(atob(encodedState));
     } catch {
-        return { path: [], variants: [], povColours: []};
+        return { path: [], variants: [], povColours: [] };
     }
 }
 
 function saveStateToURL(path, variants) {
-    const encodedState = btoa(JSON.stringify({path, variants, povColours}));
+    const encodedState = btoa(JSON.stringify({ path, variants, povColours }));
     const url = new URL(window.location);
     url.searchParams.set("state", encodedState);
     window.history.replaceState(null, "", url);
@@ -167,7 +149,7 @@ function parsePaceMultiplier(pace) {
 
     pace = pace.replace("pace", "");
 
-    const cleanpace = pace.replace("ms", "").replace("s","").trim();
+    const cleanpace = pace.replace("ms", "").replace("s", "").trim();
     const isNumber = cleanpace !== "" && isFinite(cleanpace);
 
     if (isNumber) {
@@ -284,7 +266,7 @@ function addNewLine(part, line, pov, lastpov, lastpovcontainer, partpov) {
             return lastpovcontainer
         } else {
             // change to a new pov container
-            const newpovcontainer =createPOVContainer(pov, !isPart ? partpov : null);
+            const newpovcontainer = createPOVContainer(pov, !isPart ? partpov : null);
             adjustTextColour(line, newpovcontainer.style.background);
             newpovcontainer.appendChild(line);
             part.appendChild(newpovcontainer);
@@ -341,24 +323,10 @@ function formatMessage(storypart, messagecontainer, messageObj, lastmsgObj, pov,
     return [messagecontainer, messageObj, pov];
 }
 
-function smoothSwapClasses(element, classname, fadeTime) {
-    oldElement = element.cloneNode(false);
-    element.parentNode.insertBefore(oldElement, element);
-    element.opacity = 0;
-    element.className = classname;
-    requestAnimationFrame(() => element.style.opacity = 1);
-
-    oldElement.opacity = 0;
-
-    setTimeout(() => {
-        oldElement.remove();
-    }, fadeTime);
-}
-
 function updateWeather(weather) {
     if (weather) {
         const newWeather = weather === "clear" || weather === "none" ? "" : `weather-${weather}`;
-        smoothSwapClasses(weatherOverlay, newWeather, config.effectTransitionTime || 2000)
+        weatherCanvas.className = newWeather;
     }
 }
 
@@ -369,69 +337,27 @@ function updateBackground(colour) {
         document.body.style.background = colour.replace("reset", config.backgroundColour);
         // update text to make it readable too
         document.body.style.transition = `all ${parseFloat(config.backgroundTransitionTime)}ms ease`;
-        storyContainer.style.color = contrast(config.textColour, colour)>60 ? config.textColour : config.darkTextColour;
+        storyContainer.style.color = contrast(config.textColour, colour) > 60 ? config.textColour : config.darkTextColour;
     }
 }
 
 function updateEffect(effectType, value) {
-    effectOverlay.style.transition = `
-        --focus-size ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --chromatic ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --bloom ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --noise ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --tint-r ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --tint-g ${parseFloat(config.effectTransitionTime) || 2000}ms ease,
-        --tint-b ${parseFloat(config.effectTransitionTime) || 2000}ms ease
-    `;
-
-    let focus = 100;
-    let bloom = 0;
-    let noise = 0;
-    let chromatic = 0;
-    let tint = [0, 0, 0];
+    const fadeTime = parseFloat(config.effectTransitionTime) || 2000;
+    effectOverlay.style.transition = `--focus-size ${fadeTime}ms ease`;
 
     switch (effectType) {
         case "focus":
-            focus = parseFloat(value.replace("%", ""));
+            const percent = parseFloat(value.replace("reset", "100").replace("%", ""));
+            effectOverlay.style.setProperty("--focus-size", `${percent}%`);
             break;
-        case "bloom":
-            bloom = parseFloat(value);
-            break
-        case "noise":
-            noise = parseFloat(value);
-            break
-        case "chromatic":
-            chromatic = parseFloat(value);
-            break
-        case "tint":
-            value = value.trim().toLowerCase();
-            const parts = value.split(/[ ,]+/).filter(Boolean);
-            if (parts.length === 3 && parts.every(v => /^\d+(\.\d+)?$/.test(v))) {
-                tint = parts.map(Number);
-                break
-            }
-
-            // use the browser to resolve named colors or hex
-            const ctx = document.createElement('canvas').getContext('2d');
-            ctx.fillStyle = value;
-            const computed = ctx.fillStyle; // normalized form like 'rgb(147, 112, 219)'
-            if (!computed.startsWith('rgb')) break;
-
-            tint = computed.match(/\d+/g).map(Number);
-            break
         default:
+            // reset all effects
+            effectOverlay.style.setProperty("--focus-size", "105%");
+            updateBackground("reset");
             break;
     }
-
-    effectOverlay.style.setProperty("--focus-size", `${focus*1.05}%`);
-    effectOverlay.style.setProperty("--bloom", `${bloom}`);
-    effectOverlay.style.setProperty("--noise", `${noise}`);
-    effectOverlay.style.setProperty("--chromatic", `${chromatic}`);
-
-    effectOverlay.style.setProperty("--tint-r", tint[0]/255);
-    effectOverlay.style.setProperty("--tint-g", tint[1]/255);
-    effectOverlay.style.setProperty("--tint-b", tint[2]/255);
 }
+
 
 async function renderText(nodeContainer, node, variantIdx) {
     const storyPart = document.createElement("div");
@@ -493,11 +419,6 @@ async function renderText(nodeContainer, node, variantIdx) {
         const [foundbgvalue, _, foundbgeffect] = extractRegexArg(line, BACKGROUND_EFFECT_PATTERN);
         if (foundbgeffect) {
             updateEffect(foundbgeffect, foundbgvalue);
-            continue
-        }
-        const foundtint = extractRegexArg(line, BACKGROUND_TINT_PATTERN)[0];
-        if (foundtint) {
-            updateEffect("tint", foundtint);
             continue
         }
 
@@ -590,7 +511,7 @@ function visitable(path, choices) {
     return Object.entries(choices).filter(([_, target]) => {
         const node = storyData[target];
         if (!node) return true; // unimplemented, sure, let it show
-        const alreadyVisited = path.slice(0, lastNode+2).includes(target);
+        const alreadyVisited = path.slice(0, lastNode + 2).includes(target);
         return !alreadyVisited || node.revisit;
     });
 }
@@ -736,7 +657,7 @@ function resetStory() {
     lastNode = -1;
 
     // fetch all nodes with start=true
-    const startNodes = Object.entries(storyData).filter(([k,v]) => v.start).map(([k]) => k);
+    const startNodes = Object.entries(storyData).filter(([k, v]) => v.start).map(([k]) => k);
     if (!startNodes.length) {
         error("No starting story nodes defined");
     }

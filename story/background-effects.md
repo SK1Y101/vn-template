@@ -46,35 +46,6 @@ That's exciting isn't it?
 
 You should probably note, effects will persist until the next part that writes a new one (either in the metadata or in the text as commands). it's possible for a background colour to stay for many many choices if you don't reset/overwrite it!
 
-So, let's see the other effects?
-
-`/bloom (fraction, 0-1)`
-
-/bloom 0.5
-/pause 1s
-
-`/noise (fraction, 0-1)`
-
-/noise 0.5
-/pause 1s
-
-`/chromatic (pixel offset)`
-
-/chromatic 2
-/pause 1s
-
-`/tint r, g, b`
-
-/tint 100 200 100
-/pause 1s
-
-`/tint (colour)`
-
-/tint cyan
-/pause 1s
-
-All of them can take `/(effect) reset` to remove, but sometimes it's faster just to use `/effect reset`
-
-`/effect reset`
+sometimes it's faster just to use `/effect reset` to remove all of the changes above
 
 /effect reset

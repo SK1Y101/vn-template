@@ -21,7 +21,9 @@ p {
     box-sizing: border-box;
     pointer-events: none;
     height:auto;
+    min-height: 100vh;
     padding-bottom: 7.5%;
+    background: rgba(0,0,0,0.25);
 }
 
 .story-node {
@@ -197,3 +199,14 @@ p {
         transform: translateX(-50%) translateY(-0.2em);
     }
 }
+
+#weather-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.weather-rain {}
+
+.weather-clear {}

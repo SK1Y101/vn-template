@@ -19,53 +19,55 @@ These can be applied as either `/(weather)` in the text, or `weather: (weather)`
 our options are:
 
 /rain
-
-Rain
-
+rain
 /pause 1s
 
 /snow
-
-Snow
-
+snow
 /pause 1s
 
 /fog
-
-Fog
-
+fog
 /pause 1s
 
-/dust
-
-Dust
-
+/overcast
+overcast
 /pause 1s
 
 /fireflies
-
-Fireflies
-
+fireflies
 /pause 1s
 
 /blizzard
-
-Blizzard
-
+blizzard
 /pause 1s
 
-/harsh-sun
+/dust
+dust
+/pause 1s
 
-Harsh sun
+/wind
+wind
+/pause 1s
 
+/sunny
+sunny
+/pause 1s
+
+/aurora
+aurora
+/pause 1s
+
+/thunderstorm
+thunderstorm
+/pause 1s
+
+/night
+night
 /pause 1s
 
 /clear
 
-Clear will remove
+Clear and none will remove
 
 /pause 1s
-
-/none
-
-So will None.
