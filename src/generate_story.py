@@ -40,17 +40,13 @@ BYTES = rf"{BYTE}\s,?{BYTE}\s,?{BYTE}"
 BACKGROUND_EFFECTS_PATTERN = re.compile(
     r"^/(" +
     "|".join((
-        r"focus (?:\d+\%|reset)",
-        rf"bloom (?:{FRACTION}|reset)",
-        rf"noise (?:{FRACTION}|reset)",
-        r"chromatic (?:\d+|reset)",
-        rf"tint (?:reset|{BYTES}|{HEX_COLOURS}|{'|'.join(NAMED_COLOURS)})",
+        r"focus (?:\d+(\.\d+)?\%|reset)",
         r"effect reset"
         )) +
     ")"
 )
 
-WEATHER_PATTERN = re.compile(r"^/(rain|snow|fog|dust|fireflies|blizzard|harsh-sun|clear|none)$")
+WEATHER_PATTERN = re.compile(r"^/(rain|snow|fog|overcast|dust|fireflies|blizzard|aurora|wind|thunderstorm|sunny|night|clear|none)$")
 META_WEATHER_PATTERN = re.compile(rf"^{WEATHER_PATTERN.pattern[1:]}$")
 
 def debug(part: StoryPart | None = None, msg: str = ""):
